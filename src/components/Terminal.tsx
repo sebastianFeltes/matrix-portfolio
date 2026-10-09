@@ -1,109 +1,85 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import { motion, useReducedMotion } from 'motion/react'
 import { profile } from '../data/profile'
-
-const PROMPT = 'visitor@portfolio:~$'
-const BOOT = ['iniciando sistema...', `conectado a ${profile.name}`, 'escribí "help" para ver los comandos.']
+import { dict, fmt, useLang } from '../i18n'
+import { COMMAND_NAMES, runCommand } from '../terminal/commands'
+import { completePath, formatCwd } from '../terminal/fs'
 
 type Line = { id: number; content: ReactNode }
 
-const COMMANDS: Record<string, { help: string; run: () => ReactNode }> = {
-  help: {
-    help: 'muestra esta ayuda',
-    run: () => (
-      <ul>
-        {Object.entries(COMMANDS).map(([name, c]) => (
-          <li key={name}>
-            <span className="text-phosphor">{name.padEnd(10)}</span>
-            <span className="text-phosphor-dim">{c.help}</span>
-          </li>
-        ))}
-      </ul>
-    ),
-  },
-  about: { help: 'quién soy', run: () => profile.about },
-  projects: {
-    help: 'lista de proyectos',
-    run: () => (
-      <ul>
-        {profile.projects.map((p) => (
-          <li key={p.name}>
-            <a href={p.url} target="_blank" rel="noreferrer" className="underline">{p.name}</a>
-            <span className="text-phosphor-dim"> — {p.description}</span>
-          </li>
-        ))}
-      </ul>
-    ),
-  },
-  contact: {
-    help: 'cómo contactarme',
-    run: () => (
-      <ul>
-        {profile.contact.map((c) => (
-          <li key={c.label}>
-            <span className="text-phosphor-dim">{c.label.padEnd(10)}</span>
-            <a href={c.href} target="_blank" rel="noreferrer" className="underline">{c.text}</a>
-          </li>
-        ))}
-      </ul>
-    ),
-  },
-    stack: {
-    help: 'tecnologías que uso',
-    run: () => (
-      <ul>
-        {Object.entries(profile.stack).map(([area, items]) => (
-          <li key={area}>
-            <span className="text-phosphor">{area.padEnd(10)}</span>
-            <span className="text-phosphor-dim">{items.join(' · ')}</span>
-          </li>
-        ))}
-      </ul>
-    ),
-  },
-  whoami: { help: 'quién sos vos', run: () => 'visitor — gracias por pasar.' },
-  clear: { help: 'limpia la pantalla', run: () => null },
-}
-
 let nextId = 0
 const line = (content: ReactNode): Line => ({ id: nextId++, content })
-const finePointer = typeof window !== 'undefined' && window.matchMedia('(pointer: fine)').matches
+
+const commonPrefix = (xs: string[]) =>
+  xs.reduce((a, b) => {
+    let i = 0
+    while (i < a.length && i < b.length && a[i].toLowerCase() === b[i].toLowerCase()) i++
+    return a.slice(0, i)
+  })
 
 export default function Terminal() {
   const reduce = useReducedMotion()
+  const { lang, setLang, t } = useLang()
   const [lines, setLines] = useState<Line[]>([])
   const [booted, setBooted] = useState(false)
   const [input, setInput] = useState('')
   const [history, setHistory] = useState<string[]>([])
   const [cursor, setCursor] = useState(-1)
+  const [cwd, setCwd] = useState<string[]>([])
   const inputRef = useRef<HTMLInputElement>(null)
   const endRef = useRef<HTMLDivElement>(null)
+  const bootLang = useRef(lang)
+
+  const prompt = `visitor@portfolio:${formatCwd(cwd)}$`
 
   useEffect(() => {
+    const boot = dict[bootLang.current].boot.map((s) => fmt(s, { name: profile.name }))
     if (reduce) {
-      setLines(BOOT.map(line))
+      setLines(boot.map(line))
       setBooted(true)
       return
     }
-    const timers = BOOT.map((text, i) => setTimeout(() => setLines((l) => [...l, line(text)]), 400 * (i + 1)))
-    timers.push(setTimeout(() => setBooted(true), 400 * (BOOT.length + 1)))
+    setLines([])
+    const timers = boot.map((text, i) => setTimeout(() => setLines((l) => [...l, line(text)]), 400 * (i + 1)))
+    timers.push(setTimeout(() => setBooted(true), 400 * (boot.length + 1)))
     return () => timers.forEach(clearTimeout)
   }, [reduce])
 
-  useEffect(() => {endRef.current?.scrollIntoView({ block: 'nearest' })}, [lines])
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [lines])
 
   const run = (raw: string) => {
-    const cmd = raw.trim().toLowerCase()
-    if (cmd) setHistory((h) => [...h, cmd])
+    const trimmed = raw.trim()
+    const [name = '', ...args] = trimmed.split(/\s+/)
+    const nextHistory = trimmed ? [...history, trimmed] : history
+    setHistory(nextHistory)
     setCursor(-1)
-    if (cmd === 'clear') return setLines([])
-    const echo = line(<span><span className="text-phosphor-dim">{PROMPT}</span> {raw}</span>)
-    const out = !cmd
-      ? null
-      : COMMANDS[cmd]
-        ? line(COMMANDS[cmd].run())
-        : line(<span className="text-phosphor-dim">comando no encontrado: {cmd}. Probá "help".</span>)
-    setLines((l) => [...l, echo, ...(out ? [out] : [])])
+    const echo = line(<span><span className="text-phosphor-dim">{prompt}</span> {raw}</span>)
+    if (!name) return setLines((l) => [...l, echo])
+    const out = runCommand(name, { lang, args, cwd, setCwd, setLang, history: nextHistory })
+    if (out && typeof out === 'object' && 'clear' in out) return setLines([])
+    setLines((l) => [...l, echo, ...(out != null && out !== '' ? [line(out as ReactNode)] : [])])
+  }
+
+  const complete = () => {
+    const parts = input.split(/\s+/)
+    const last = parts[parts.length - 1] ?? ''
+    const isCmd = parts.length <= 1
+    const matches = isCmd
+      ? COMMAND_NAMES.filter((c) => c.startsWith(last.toLowerCase()))
+      : completePath(cwd, last)
+    if (!matches.length) return
+    const head = parts.slice(0, -1).join(' ')
+    const join = (s: string) => (head ? `${head} ${s}` : s)
+    if (matches.length === 1) {
+      const m = matches[0]
+      setInput(join(m + (isCmd || !m.endsWith('/') ? ' ' : '')))
+    } else {
+      const pre = commonPrefix(matches)
+      if (pre.length > last.length) setInput(join(pre))
+      else setLines((l) => [...l, line(<span className="text-phosphor-dim">{matches.join('  ')}</span>)])
+    }
   }
 
   const onKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
@@ -121,15 +97,16 @@ export default function Terminal() {
       setInput(valid ? history[next] : '')
     } else if (e.key === 'Tab') {
       e.preventDefault()
-      const matches = Object.keys(COMMANDS).filter((c) => c.startsWith(input.trim().toLowerCase()))
-      if (matches.length === 1) setInput(matches[0])
-      else if (matches.length > 1) setLines((l) => [...l, line(<span className="text-phosphor-dim">{matches.join('  ')}</span>)])
+      complete()
+    } else if (e.key === 'l' && e.ctrlKey) {
+      e.preventDefault()
+      setLines([])
     }
   }
 
   return (
     <section
-      aria-label="Terminal interactiva"
+      aria-label={t.terminal}
       onClick={() => inputRef.current?.focus()}
       className="relative w-full max-w-3xl border border-phosphor-dim bg-black/80 p-4 text-sm sm:text-base"
     >
@@ -143,18 +120,18 @@ export default function Terminal() {
       </div>
       {booted ? (
         <label className="mt-1 flex items-center gap-2">
-          <span className="shrink-0 text-phosphor-dim">{PROMPT}</span>
+          <span className="shrink-0 text-phosphor-dim">{prompt}</span>
           <input
             ref={inputRef}
-            autoFocus={finePointer}
+            autoFocus
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={onKeyDown}
-            aria-label="Comando"
+            aria-label={t.command}
             autoComplete="off"
             autoCapitalize="off"
             spellCheck={false}
-            className="w-full min-w-0 bg-transparent text-phosphor caret-phosphor outline-none focus-visible:outline-none"
+            className="w-full min-w-0 bg-transparent text-phosphor caret-transparent outline-none focus-visible:outline-none"
           />
         </label>
       ) : (

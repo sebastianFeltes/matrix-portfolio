@@ -26,6 +26,7 @@ input:focus-visible {
   outline-offset: 3px;
 }
 
+/* Scanlines suaves sobre toda la página */
 .scanlines {
   pointer-events: none;
   position: fixed;
@@ -55,5 +56,30 @@ input:focus-visible {
   *::after {
     animation: none !important;
     transition: none !important;
+  }
+}
+
+/* Star Wars–style crawl */
+.sw-perspective {
+  perspective: 300px;
+  perspective-origin: 50% 0%;
+}
+
+.sw-crawl {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  transform-origin: 50% 0%;
+  transform: rotateX(25deg);
+  animation: sw-crawl 25s linear forwards;
+}
+
+@keyframes sw-crawl {
+  from {
+    top: 100%;
+  }
+  to {
+    top: -260%;
   }
 }

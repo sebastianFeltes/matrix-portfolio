@@ -1,0 +1,59 @@
+@import "tailwindcss";
+
+@theme {
+  --color-phosphor: #00ff66;
+  --color-phosphor-dim: #0a8f3d;
+  --color-phosphor-faint: #06331a;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+}
+
+html,
+body {
+  background: #000;
+  color: var(--color-phosphor);
+  font-family: var(--font-mono);
+}
+
+::selection {
+  background: var(--color-phosphor);
+  color: #000;
+}
+
+a:focus-visible,
+button:focus-visible,
+input:focus-visible {
+  outline: 1px dashed var(--color-phosphor);
+  outline-offset: 3px;
+}
+
+.scanlines {
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: repeating-linear-gradient(
+    to bottom,
+    rgba(0, 0, 0, 0) 0px,
+    rgba(0, 0, 0, 0) 2px,
+    rgba(0, 0, 0, 0.25) 3px
+  );
+}
+
+.cursor {
+  animation: blink 1s steps(1) infinite;
+}
+
+@keyframes blink {
+  50% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}
